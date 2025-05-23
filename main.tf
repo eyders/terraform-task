@@ -65,13 +65,21 @@ resource "aws_instance" "ec2_test" {
   subnet_id     = module.vpc.private_subnets[count.index]
   vpc_security_group_ids = [aws_security_group.sg_ec2.id]
 
+  # Waiting for Nat Gateway to avoid http installation error
+  depends_on = [
+    module.vpc
+  ]
+
   user_data = <<-EOF
               #!/bin/bash
               yum update -y
               yum install -y httpd
               systemctl start httpd
               systemctl enable httpd
-              echo "<html><body><h1>Hola Mundo!!</h1></body></html>" > /var/www/html/index.html
+              TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || echo "")
+              INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id || echo "")
+              PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4 || echo "")
+              echo "<html><body><h1>Hola Mundo!!</h1><h2>Instance: $INSTANCE_ID, IP: $PRIVATE_IP</h2></body></html>" > /var/www/html/index.html
               EOF
 
   tags = {
@@ -133,4 +141,10 @@ resource "aws_elb" "test_lb" {
     Name = "test-lb"
     Terraform = "true"
   }
+}
+
+# Output to get the DNS name of the load balancer
+output "alb_dns_name" {
+  description = "DNS name of the load balancer"
+  value       = aws_elb.test_lb.dns_name
 }
